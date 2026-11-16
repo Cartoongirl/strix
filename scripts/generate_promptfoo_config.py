@@ -83,4 +83,3 @@ if __name__ == "__main__":
         encoding="utf-8",
     )
     print(f"Generated promptfooconfig.yaml with {len(cfg['prompts'])} prompt targets.")
-
