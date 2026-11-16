@@ -17,7 +17,7 @@ jobs:
   promptfoo-code-scan:
     name: Promptfoo LLM Code Scan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && (secrets.OPENAI_API_KEY != '' || secrets.PROMPTFOO_API_KEY != '')
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
