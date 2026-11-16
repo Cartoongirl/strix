@@ -13,11 +13,16 @@ permissions:
   pull-requests: write
 
 jobs:
-  # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js)
+    # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js) — Runs on BOTH Push & PR
   promptfoo-code-scan:
     name: Promptfoo LLM Code Scan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,12 +30,33 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Run Promptfoo Code Scan
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Promptfoo Static Code Scan (Push / Manual)
+        if: github.event_name != 'pull_request'
+        run: |
+          npx promptfoo@latest code-scans run strix/ \
+            --output promptfoo-codescan.sarif \
+            --format sarif || true
+
+      - name: Run Promptfoo PR Diff Code Scan (Pull Request)
+        if: github.event_name == 'pull_request'
         uses: promptfoo/code-scan-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           promptfoo-api-key: ${{ secrets.PROMPTFOO_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Promptfoo Code Scan SARIF
+        if: always() && hashFiles('promptfoo-codescan.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: promptfoo-codescan.sarif
+          category: promptfoo-code-scan
+
 
   # 2. Dynamic Agent Prompt & Skill Red Teaming (.jinja, .md)
   promptfoo-redteam:
