@@ -1,0 +1,147 @@
+name: Full-Scope Security & LLM Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js)
+  promptfoo-code-scan:
+    name: Promptfoo LLM Code Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Promptfoo Code Scan
+        uses: promptfoo/code-scan-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-error: "true"
+
+  # 2. Dynamic Agent Prompt & Skill Red Teaming (.jinja, .md)
+  promptfoo-redteam:
+    name: Promptfoo Dynamic Prompt Red Team
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python & PyYAML
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate Dynamic promptfooconfig.yaml
+        run: |
+          pip install pyyaml
+          python scripts/generate_promptfoo_config.py
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Promptfoo Red Team (Fails PR on Vulnerable Prompts)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          npx promptfoo@latest redteam run \
+            --config promptfooconfig.yaml \
+            --output redteam-results.json \
+            --fail-on-error \
+            --tag git.sha="${{ github.sha }}"
+
+      - name: Upload Red Team Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-redteam-report
+          path: redteam-results.json
+
+  # 3. Multi-Language SAST (.go, .sh, .py, .ts) with Blocking Errors
+  sast-all-languages:
+    name: SAST (Go, Bash, Python, TS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep (All Languages - Fails on Error Severity)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/default
+          generateSarif: "1"
+        env:
+          SEMGREP_SARIF_FILE: semgrep.sarif
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Run ShellCheck on Container & Build Scripts (Fails on Warnings/Errors)
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          find . -type f -name "*.sh" -exec shellcheck --severity=warning {} +
+
+      - name: Setup Go for Gosec
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Run Gosec on Go TUI (Fails on Medium/High Findings)
+        run: |
+          go install ://github.com
+          if [ -f "go.mod" ]; then
+            gosec -severity medium -fmt sarif -out gosec.sarif ./...
+          else
+            find . -name "go.mod" -execdir gosec -severity medium -fmt sarif -out "$GITHUB_WORKSPACE/gosec.sarif" ./... \;
+          fi
+
+      - name: Upload Gosec SARIF
+        if: always() && hashFiles('gosec.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  # 4. Containers, Secrets & Lockfiles (Fails on Critical/High CVEs or Secrets)
+  supply-chain-and-containers:
+    name: Trivy Container & Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy Scan (Blocks on CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          format: sarif
+          output: trivy.sarif
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
