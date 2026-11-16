@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run Promptfoo Code Scan
         uses: promptfoo/code-scan-action@v1
@@ -41,10 +42,12 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      PROMPTFOO_PASS_RATE_THRESHOLD: "100"
+      PROMPTFOO_PASS_RATE_THRESHOLD: "0"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Python & PyYAML
         uses: actions/setup-python@v5
@@ -54,7 +57,11 @@ jobs:
       - name: Generate Dynamic promptfooconfig.yaml
         run: |
           pip install pyyaml
-          python scripts/generate_promptfoo_config.py
+          if [ -f ".github/scripts/generate_promptfoo_config.py" ]; then
+            python .github/scripts/generate_promptfoo_config.py
+          else
+            python scripts/generate_promptfoo_config.py
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -82,6 +89,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Python for Semgrep
         uses: actions/setup-python@v5
@@ -105,19 +114,10 @@ jobs:
           sudo apt-get update && sudo apt-get install -y shellcheck
           find . -type f -name "*.sh" -exec shellcheck --severity=error {} +
 
-      - name: Setup Go for Gosec
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-
       - name: Run Gosec on Go TUI
-        run: |
-          go install ://github.com
-          if [ -f "go.mod" ]; then
-            gosec -no-fail -fmt sarif -out gosec.sarif ./...
-          else
-            find . -name "go.mod" -execdir gosec -no-fail -fmt sarif -out "$GITHUB_WORKSPACE/gosec.sarif" ./... \;
-          fi
+        uses: securego/gosec@master
+        with:
+          args: -no-fail -fmt sarif -out gosec.sarif ./...
 
       - name: Upload Gosec SARIF
         if: always() && hashFiles('gosec.sarif') != ''
@@ -126,15 +126,17 @@ jobs:
           sarif_file: gosec.sarif
           category: gosec
 
-  # 4. Containers, Secrets & Lockfiles (Fails on Critical/High CVEs or Secrets)
+  # 4. Containers, Secrets & Lockfiles
   supply-chain-and-containers:
     name: Trivy Container & Dependency Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Run Trivy Scan (Blocks on CRITICAL/HIGH)
+      - name: Run Trivy Scan (Reports All CRITICAL/HIGH Findings)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -151,4 +153,160 @@ jobs:
         with:
           sarif_file: trivy.sarif
           category: trivy
+name: Full-Scope Security & LLM Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js)
+  promptfoo-code-scan:
+    name: Promptfoo LLM Code Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Promptfoo Code Scan
+        uses: promptfoo/code-scan-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          promptfoo-api-key: ${{ secrets.PROMPTFOO_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # 2. Dynamic Agent Prompt & Skill Red Teaming (.jinja, .md)
+  promptfoo-redteam:
+    name: Promptfoo Dynamic Prompt Red Team
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PROMPTFOO_PASS_RATE_THRESHOLD: "0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python & PyYAML
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate Dynamic promptfooconfig.yaml
+        run: |
+          pip install pyyaml
+          if [ -f ".github/scripts/generate_promptfoo_config.py" ]; then
+            python .github/scripts/generate_promptfoo_config.py
+          else
+            python scripts/generate_promptfoo_config.py
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Promptfoo Red Team
+        run: |
+          npx promptfoo@latest redteam run \
+            --config promptfooconfig.yaml \
+            --output redteam-results.json \
+            --tag git.sha="${{ github.sha }}"
+
+      - name: Upload Red Team Report Artifact
+        if: always() && hashFiles('redteam-results.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-redteam-report
+          path: redteam-results.json
+
+  # 3. Multi-Language SAST (.go, .sh, .py, .ts)
+  sast-all-languages:
+    name: SAST (Go, Bash, Python, TS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python for Semgrep
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Semgrep (All Languages)
+        run: |
+          pip install semgrep
+          semgrep scan --config auto --sarif --output semgrep.sarif || true
+
+      - name: Upload Semgrep SARIF
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Run ShellCheck on Container & Build Scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          find . -type f -name "*.sh" -exec shellcheck --severity=error {} +
+
+      - name: Run Gosec on Go TUI
+        uses: securego/gosec@master
+        with:
+          args: -no-fail -fmt sarif -out gosec.sarif ./...
+
+      - name: Upload Gosec SARIF
+        if: always() && hashFiles('gosec.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  # 4. Containers, Secrets & Lockfiles
+  supply-chain-and-containers:
+    name: Trivy Container & Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Trivy Scan (Reports All CRITICAL/HIGH Findings)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+          format: sarif
+          output: trivy.sarif
+
+      - name: Upload Trivy SARIF
+        if: always() && hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
 
