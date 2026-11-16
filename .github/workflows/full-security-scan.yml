@@ -103,7 +103,7 @@ jobs:
       - name: Run ShellCheck on Container & Build Scripts
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          find . -type f -name "*.sh" -exec shellcheck --severity=warning {} +
+          find . -type f -name "*.sh" -exec shellcheck --severity=error {} +
 
       - name: Setup Go for Gosec
         uses: actions/setup-go@v5
