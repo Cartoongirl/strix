@@ -19,8 +19,8 @@ def build_config() -> dict[str, Any]:
         target_id = "openrouter:meta-llama/llama-3.3-70b-instruct"
         provider_label = "openrouter-llama-3.3-70b"
     elif os.getenv("GROQ_API_KEY"):
-        target_id = "groq:llama-3.3-70b-versatile"
-        provider_label = "groq-llama-3.3-70b"
+        target_id = "groq:openai/gpt-oss-120b"
+        provider_label = "groq-gpt-oss-120b"
     elif os.getenv("TOGETHER_API_KEY"):
         target_id = "together:meta-llama/Llama-3.3-70B-Instruct-Turbo"
         provider_label = "together-llama-3.3-70b"
