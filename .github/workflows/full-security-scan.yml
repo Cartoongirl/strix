@@ -9,19 +9,19 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  pull-requests: write
 
 jobs:
-    # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js) — Runs on BOTH Push & PR
-    # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js)
+  # 1. LLM Data-Flow Scanning (.py, .ts, .tsx, .js)
   promptfoo-code-scan:
     name: Promptfoo LLM Code Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
     steps:
@@ -49,22 +49,16 @@ jobs:
           sarif_file: promptfoo-codescan.sarif
           category: promptfoo-code-scan
 
-      - name: Upload Promptfoo Code Scan SARIF
-        if: always() && hashFiles('promptfoo-codescan.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: promptfoo-codescan.sarif
-          category: promptfoo-code-scan
-
-
   # 2. Dynamic Agent Prompt & Skill Red Teaming (.jinja, .md)
   promptfoo-redteam:
     name: Promptfoo Dynamic Prompt Red Team
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       PROMPTFOO_PASS_RATE_THRESHOLD: "0"
@@ -82,11 +76,7 @@ jobs:
       - name: Generate Dynamic promptfooconfig.yaml
         run: |
           pip install pyyaml
-          if [ -f ".github/scripts/generate_promptfoo_config.py" ]; then
-            python .github/scripts/generate_promptfoo_config.py
-          else
-            python scripts/generate_promptfoo_config.py
-          fi
+          python scripts/generate_promptfoo_config.py
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -98,7 +88,8 @@ jobs:
           npx promptfoo@latest redteam run \
             --config promptfooconfig.yaml \
             --output redteam-results.json \
-            --max-concurrency 1 \
+            --injectVar untrusted_tool_output \
+            --max-concurrency 3 \
             --tag git.sha="${{ github.sha }}"
 
       - name: Upload Red Team Report Artifact
@@ -112,6 +103,9 @@ jobs:
   sast-all-languages:
     name: SAST (Go, Bash, Python, TS)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -156,6 +150,9 @@ jobs:
   supply-chain-and-containers:
     name: Trivy Container & Dependency Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -179,6 +176,3 @@ jobs:
         with:
           sarif_file: trivy.sarif
           category: trivy
-
-
-
