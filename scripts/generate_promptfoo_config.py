@@ -1,12 +1,17 @@
+"""Generate dynamic Promptfoo red-team configuration from Strix templates."""
+
 import os
 from pathlib import Path
+import sys
+from typing import Any
 
 import yaml
 
 MIN_TEMPLATE_LENGTH = 50
 
 
-def build_config() -> dict:
+def build_config() -> dict[str, Any]:
+    """Discover Jinja2 and Markdown prompts and build the Promptfoo config."""
     if os.getenv("ANTHROPIC_API_KEY"):
         target_id = "anthropic:messages:claude-haiku-4-5-20251001"
         provider_label = "anthropic-claude-haiku-4-5"
@@ -30,7 +35,7 @@ def build_config() -> dict:
     jinja_files = sorted(root.rglob("*.jinja"))
     skill_files = sorted(root.rglob("SKILL.md"))
 
-    discovered_prompts = []
+    discovered_prompts: list[str] = []
     for file_path in [*jinja_files, *skill_files]:
         content = file_path.read_text(encoding="utf-8", errors="ignore").strip()
         if len(content) < MIN_TEMPLATE_LENGTH:
@@ -82,4 +87,6 @@ if __name__ == "__main__":
         yaml.safe_dump(cfg, sort_keys=False),
         encoding="utf-8",
     )
-    print(f"Generated promptfooconfig.yaml with {len(cfg['prompts'])} prompt targets.")
+    sys.stdout.write(
+        f"Generated promptfooconfig.yaml with {len(cfg['prompts'])} prompt targets.\n"
+    )
