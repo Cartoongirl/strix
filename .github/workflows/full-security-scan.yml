@@ -88,7 +88,6 @@ jobs:
           npx promptfoo@latest redteam run \
             --config promptfooconfig.yaml \
             --output redteam-results.json \
-            --injectVar untrusted_tool_output \
             --max-concurrency 3 \
             --tag git.sha="${{ github.sha }}"
 
